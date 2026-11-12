@@ -8,8 +8,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 TOKEN = "8809469360:AAES0Lddoz_slfBDbmi51tJBWaIhfsvp0vE"
 
-BYBIT_URL = "https://api.bybit.com/v5/market/tickers"
 
+BYBIT_URL = "https://api.bytick.com/v5/market/tickers"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
