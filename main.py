@@ -1,72 +1,102 @@
 
 import asyncio
 import requests
-import json
-
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 TOKEN = "8809469360:AAES0Lddoz_slfBDbmi51tJBWaIhfsvp0vE"
 
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-BYBIT_URL = "https://api.bytick.com/v5/market/tickers"
+def get_json(url, params=None):
+    r = requests.get(
+        url, params=params, headers=HEADERS, timeout=12
+    )
+    r.raise_for_status()
+    return r.json()
+
+def bybit():
+    errors = []
+    for host in ["https://api.bybit.com", "https://api.bytick.com"]:
+        try:
+            d = get_json(
+                host + "/v5/market/tickers",
+                {"category": "linear", "symbol": "BTCUSDT"}
+            )
+            if d.get("retCode") != 0:
+                raise ValueError(d.get("retMsg"))
+            return float(d["result"]["list"][0]["lastPrice"])
+        except Exception as e:
+            errors.append(str(e))
+    raise ValueError("Bybit: " + errors[-1])
+
+def binance():
+    d = get_json(
+        "https://fapi.binance.com/fapi/v1/ticker/price",
+        {"symbol": "BTCUSDT"}
+    )
+    return float(d["price"])
+
+def okx():
+    d = get_json(
+        "https://www.okx.com/api/v5/market/ticker",
+        {"instId": "BTC-USDT-SWAP"}
+    )
+    if d.get("code") != "0" or not d.get("data"):
+        raise ValueError(d.get("msg", "OKX error"))
+    return float(d["data"][0]["last"])
+
+def gate():
+    d = get_json(
+        "https://api.gateio.ws/api/v4/futures/usdt/tickers",
+        {"contract": "BTC_USDT"}
+    )
+    return float(d[0]["last"])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 Bybit Signal Bot работает!\n"
-        "Напиши /price для проверки рынка."
+        "Команды:\n"
+        "/price — цены BTC на биржах"
     )
 
-
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ Получаю цену BTCUSDT...")
+    await update.message.reply_text("⏳ Проверяю 4 биржи...")
 
-    try:
-        response = await asyncio.to_thread(
-            requests.get,
-            BYBIT_URL,
-            params={
-                "category": "linear",
-                "symbol": "BTCUSDT"
-            },
-            timeout=15
+    exchanges = {
+        "Bybit": bybit,
+        "Binance Futures": binance,
+        "OKX Swap": okx,
+        "Gate.io Futures": gate
+    }
+
+    results = await asyncio.gather(*[
+        asyncio.to_thread(func)
+        for func in exchanges.values()
+    ], return_exceptions=True)
+
+    prices = []
+    messages = ["₿ BTCUSDT — котировки фьючерсов\n"]
+
+    for name, result in zip(exchanges.keys(), results):
+        if isinstance(result, Exception):
+            messages.append(f"❌ {name}: недоступна")
+        else:
+            prices.append(result)
+            messages.append(f"✅ {name}: {result:,.2f} USDT")
+
+    if prices:
+        average = sum(prices) / len(prices)
+        messages.append(
+            f"\n📊 Средняя цена: {average:,.2f} USDT"
         )
-
-        response.raise_for_status()
-
-        try:
-            data = response.json()
-        except json.JSONDecodeError:
-            raise ValueError(
-                f"Bybit вернул не JSON: {response.text[:200]}"
-            )
-
-        if data.get("retCode") != 0:
-            raise ValueError(
-                f"Ошибка Bybit: {data.get('retMsg', 'Неизвестная ошибка')}"
-            )
-
-        ticker_list = data.get("result", {}).get("list", [])
-
-        if not ticker_list:
-            raise ValueError("Bybit не вернул данные BTCUSDT")
-
-        current_price = ticker_list[0].get("lastPrice")
-
-        if not current_price:
-            raise ValueError("Цена отсутствует в ответе Bybit")
-
-        await update.message.reply_text(
-            f"₿ BTCUSDT\n"
-            f"Текущая цена: {current_price} USDT\n"
-            f"✅ Данные получены с Bybit"
+        messages.append(
+            f"Доступно бирж: {len(prices)}/4"
         )
+    else:
+        messages.append("\n❌ Все источники недоступны.")
 
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка получения цены:\n{str(e)[:500]}"
-        )
-
+    await update.message.reply_text("\n".join(messages))
 
 async def main():
     app = Application.builder().token(TOKEN).build()
@@ -79,9 +109,7 @@ async def main():
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-
     await asyncio.Event().wait()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
