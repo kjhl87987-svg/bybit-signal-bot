@@ -1,2 +1,3 @@
 print("Bybit Signal Bot started!")
 print("Bot is ready for configuration.")
+print("Waiting for Bybit connection...")
