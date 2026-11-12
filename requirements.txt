@@ -1,2 +1,3 @@
 pybit
 python-telegram-bot
+requests
